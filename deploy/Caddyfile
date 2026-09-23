@@ -1,0 +1,31 @@
+# ecom-intel edge: serves the built React SPA and proxies the /backend API to FastAPI.
+#
+# TLS: automatic Let's Encrypt when DOMAIN is a real hostname (A record must point
+# to this VPS). Leave DOMAIN as ":80" to serve plain HTTP (local testing, or put
+# Caddy behind another proxy). Set DOMAIN in your shell/.env before `docker compose up`.
+
+{$DOMAIN}
+
+# API under /backend (same contract as the Vite dev proxy: prefix is stripped).
+handle /backend* {
+    uri strip_prefix /backend
+    reverse_proxy api:8000
+}
+
+# Direct health probe.
+handle /health {
+    reverse_proxy api:8000
+}
+
+# React SPA with a history-mode fallback (static must live inside a handle
+# block: top-level try_files would rewrite API paths before handle runs).
+handle {
+    root * /srv
+    try_files {path} /index.html
+    file_server
+}
+
+log {
+    output stdout
+    format console
+}

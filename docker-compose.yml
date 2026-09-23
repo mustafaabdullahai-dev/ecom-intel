@@ -1,0 +1,79 @@
+name: ecom-intel
+
+# One-shot deployment on a single VPS:
+#   API keys:  cp .env.example .env and fill (your existing local .env works too)
+#   Domain:    export DOMAIN=app.example.com  (must point to the VPS for TLS)
+#   Start:     docker compose up -d --build
+#   Stop:      docker compose down            (data persists; remove with -v)
+
+services:
+  # PostgreSQL + pgvector — schema applied automatically on first boot.
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ecom
+      POSTGRES_PASSWORD: ecom
+      POSTGRES_DB: ecom
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecom -d ecom"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: publish the built SPA into the shared webroot volume.
+  setup:
+    build: .
+    restart: "no"
+    command: ["sh", "-c", "cp -a /app/ui/dist/. /www/"]
+    volumes:
+      - webroot:/www
+    depends_on:
+      - db
+
+  # FastAPI backend (uvicorn) — webhook + API layer over the pipeline.
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Reach Postgres on the compose network (root .env points at localhost).
+      DATABASE_URL: postgresql+psycopg2://ecom:ecom@db:5432/ecom
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      # Turn on the APScheduler automation once the stack is up (the .env default is false).
+      SCHEDULER_ENABLED: "true"
+      SERP_PROVIDER: ${SERP_PROVIDER:-serper}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - reports:/app/output
+
+  # Caddy — TLS termination + static SPA hosting + /backend reverse proxy.
+  web:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+    volumes:
+      - webroot:/srv:ro
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
+  webroot:
+  reports:
+  caddy_data:
+  caddy_config:
