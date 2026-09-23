@@ -6,7 +6,11 @@ monitors, and evaluates ecommerce businesses across any region, scores each one
 on a standardized 14-score model, and produces a ranked, prioritized prospect
 knowledge base with time-horizon action plans for your sales team.
 
-Runs **fully locally** (Ollama) — no cloud LLM required.
+Runs on **local Ollama models** with zero cloud keys, or on **remote free-tier
+providers** (Groq / OpenRouter / Cerebras / Gemini) via `FALLBACK_PROVIDER`.
+
+Ships with a React + Vite dashboard (`ui/`) that talks to the FastAPI backend,
+and a Docker Compose stack for single-VPS deployment.
 
 ```
 discovery -> qualify -> deepdive -> score -> recommend -> store -> report
@@ -40,10 +44,15 @@ ecom-intel/
 ├── main.py                        # CLI: single run | --schedule | --serve | --dashboard
 ├── requirements.txt
 ├── .env.example                   # copy to .env
-├── deploy/schema.sql              # PostgreSQL + pgvector schema
+├── ui/                            # React + Vite dashboard (npm run dev / build)
+├── Dockerfile                     # multi-stage: Node SPA build + Python runtime
+├── docker-compose.yml             # db + api + setup + web (Caddy) — VPS deploy
+├── deploy/
+│   ├── schema.sql                 # PostgreSQL + pgvector schema
+│   └── Caddyfile                  # TLS, static SPA, /backend proxy
 ├── docs/ROADMAP.md                # infrastructure & cost roadmap
 ├── src/
-│   ├── llm.py                     # per-agent model factory (Ollama)
+│   ├── llm.py                     # per-agent model factory (Ollama + remote providers)
 │   ├── scheduler.py               # APScheduler daily/weekly/monthly/quarterly/yearly
 │   ├── scoring.py                 # deterministic 14-score engine + priority tiers
 │   ├── schemas/                   # pydantic models (agents, scores, records)
@@ -80,6 +89,8 @@ Smaller machines: edit `src/llm.py` `MODEL_ASSIGNMENTS` to e.g. `qwen2.5:7b`,
 
 ## Setup
 
+### Backend (Python)
+
 ```bash
 cd ecom-intel
 python3 -m venv .venv
@@ -87,6 +98,66 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
+
+### Frontend (React + Vite)
+
+```bash
+cd ecom-intel/ui
+npm install
+npm run dev        # dev server on http://localhost:3000
+```
+
+## Run the backend & frontend
+
+During development you run two processes: the FastAPI backend on `:8000` and
+the Vite React app on `:3000`. The Vite server proxies `/backend/*` to the
+backend automatically (see `ui/vite.config.ts`), so the UI and API share one
+origin.
+
+### 1. Backend (FastAPI)
+
+```bash
+source .venv/bin/activate            # from the repo root
+python main.py --serve               # uvicorn src.api:app on http://127.0.0.1:8000
+# or directly:
+uvicorn src.api:app --host 0.0.0.0 --port 8000
+```
+
+Verify:
+
+```bash
+curl http://127.0.0.1:8000/health
+# {"status":"ok","postgres":true,...,"providers":[{...}]}
+```
+
+Key API endpoints (at the API root; the UI prefixes them with `/backend`):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Backend + provider status |
+| `GET /businesses` | Knowledge base (leads) |
+| `GET /businesses/{id}/records` | History for one business |
+| `GET /businesses/{id}/rationale` | Cached LLM score rationale |
+| `POST /businesses/{id}/rationale` | Generate the LLM rationale |
+| `POST /analyze` | One-off website deepdive |
+| `GET /reports` | Generated audit/PDF reports |
+
+### 2. Frontend (Vite React SPA)
+
+```bash
+cd ui
+npm run dev          # http://localhost:3000  (proxies /backend -> :8000)
+```
+
+Production build + preview:
+
+```bash
+npm run build        # emits ui/dist
+npm run preview      # serve the build on :3000 with the same /backend proxy
+```
+
+Layout: pages in `ui/src/pages/`, API client in `ui/lib/api.ts` (`BASE =
+"/backend"`), shared components in `ui/components/`.
 
 ## Usage
 
@@ -120,7 +191,21 @@ Output:
 | `USE_CELERY` / `CELERY_BROKER_URL` | `false` / redis://:6379 | Distributed deepdive |
 | `SCHEDULER_ENABLED` | `false` | Run the APScheduler loop |
 | `DAILY_HOUR` / `WEEKLY_DAY` / `MONTHLY_DAY` / `QUARTERLY_MONTHS` / `YEARLY_MONTH` | | Job timing |
-| `FALLBACK_PROVIDER` | `none` | `openai-compatible` to use a remote model |
+| `FALLBACK_PROVIDER` | `none` | `groq` / `openrouter` / `cerebras` / `gemini` for a remote LLM (leave `none` for pure Ollama) |
+| `GROQ_API_KEY` / `OPENROUTER_API_KEY` / `CEREBRAS_API_KEY` / `GEMINI_API_KEY` | | API keys for the matching provider |
+
+## Deploy (Docker Compose on a single VPS)
+
+```bash
+cp .env.example .env            # add provider keys (GROQ_API_KEY etc.)
+export DOMAIN=app.example.com   # TLS via Let's Encrypt (DNS A record -> server)
+docker compose up -d --build
+```
+
+Services: `db` (pgvector/Postgres, schema auto-applied) · `api` (uvicorn +
+scheduler) · `setup` (publishes the built SPA) · `web` (Caddy on 80/443 —
+static SPA + `/backend` prefix-strip proxy). Leave `DOMAIN` unset to serve
+plain HTTP on `:80`. Verify: `curl http://<server>/backend/health`.
 
 ## Notes / limitations
 
@@ -132,5 +217,5 @@ Output:
   and challenge-gated stores.
 - DuckDuckGo (`src/services/search.py`) is the no-key default; richer discovery
   (Google Maps, social listening) needs paid APIs.
-- Postgres, Celery, FastAPI and the Streamlit dashboard are optional plug-ins —
-  the full pipeline runs with zero keys and no external services.
+- The full pipeline runs with zero keys and no external services; PostgreSQL,
+  Celery, the FastAPI backend and the React dashboard are optional plug-ins.
