@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/*.json
+output/*.md
+output/pdf/
+logs/
+*.log
+node_modules/
+ui/node_modules/
+ui/dist/
+ui/tsconfig.tsbuildinfo
+.DS_Store
