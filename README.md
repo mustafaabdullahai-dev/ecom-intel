@@ -222,4 +222,4 @@ plain HTTP on `:80`. Verify: `curl http://<server>/backend/health`.
 
 ---
 
-#GenAIwithAM
+**#GenAIwithAM** — GenAI, LLM and AI-agent projects by Abdullah Mustafa.
