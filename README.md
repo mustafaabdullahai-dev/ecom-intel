@@ -219,3 +219,7 @@ plain HTTP on `:80`. Verify: `curl http://<server>/backend/health`.
   (Google Maps, social listening) needs paid APIs.
 - The full pipeline runs with zero keys and no external services; PostgreSQL,
   Celery, the FastAPI backend and the React dashboard are optional plug-ins.
+
+---
+
+#GenAIwithAM
